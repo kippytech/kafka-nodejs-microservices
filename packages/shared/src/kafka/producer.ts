@@ -6,9 +6,17 @@ export async function createProducer(clientId: string): Promise<Producer> {
   const kafka = createKafkaClient(clientId);
 
   // responsible for sending records/data to the kafka topics
-  const producer = kafka.producer();
+  const producer = kafka.producer({
+    idempotent: true,
+    maxInFlightRequests: 5,
+  });
 
-  await producer.connect();
+  try {
+    await producer.connect();
+  } catch (err) {
+    await producer.disconnect().catch(() => undefined);
+    throw err;
+  }
 
   logger.info({ clientId }, "kafka producer connected");
 
@@ -23,6 +31,7 @@ export async function publishJson(
 ): Promise<RecordMetadata[]> {
   const result = await producer.send({
     topic,
+    acks: -1, // Wait for all replicas to acknowledge
     messages: [
       {
         key: key ?? null,
@@ -36,20 +45,11 @@ export async function publishJson(
   return result;
 }
 
-export async function publishJsonSafe(
-  producer: Producer | null,
+export async function publishEvent(
+  producer: Producer,
   topic: string,
   payload: Record<string, unknown>,
   key?: string,
 ): Promise<void> {
-  if (!producer) {
-    logger.warn({ topic }, "kafka producer is not ready");
-    return;
-  }
-
-  try {
-    await publishJson(producer, topic, payload, key);
-  } catch (err) {
-    logger.error({ err, topic }, "kafka publish failed");
-  }
+  await publishJson(producer, topic, payload, key);
 }

@@ -2,21 +2,12 @@ import { CreateTaskInput } from "../schemas/task.schemas";
 import * as taskRepo from "../repositories/task.repository";
 import { convertToPublicTask } from "../utils/task.utils";
 import { AppError } from "shared";
-import { publishTaskEvent } from "../kafka";
 
 export async function createTask(input: CreateTaskInput, userId: string) {
-  const newlyCreatedTask = await taskRepo.createTask({
+  const newlyCreatedTask = await taskRepo.createTaskWithEvent({
     title: input.title,
     createdBy: userId,
   });
-
-  // const task = await taskRepo.createTaskWithEvent({
-  //   title: input.title,
-  //   createdBy: userId,
-  // });
-
-  // publish one event here saying ok now we just created one task
-  await publishTaskEvent(newlyCreatedTask.id, userId);
 
   return convertToPublicTask(newlyCreatedTask);
 }
@@ -43,6 +34,11 @@ export async function getSingleTask(id: string, userId: string, role: string) {
   }
 
   return convertToPublicTask(task);
+}
+
+export async function checkTaskAccess(id: string, userId: string, role: string) {
+  const task = await taskRepo.findSingleTaskById(id);
+  return { exists: Boolean(task), allowed: Boolean(task && (role === "ADMIN" || task.created_by === userId)) };
 }
 
 export async function deleteSingleTask(id: string, role: string) {

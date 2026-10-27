@@ -1,4 +1,4 @@
-import type { Consumer, EachMessagePayload } from "kafkajs";
+import type { Consumer } from "kafkajs";
 import { createKafkaClient } from "./client";
 import { logger } from "../logger/logger";
 
@@ -8,9 +8,19 @@ export async function createConsumer(
 ): Promise<Consumer> {
   const kafka = createKafkaClient(clientId);
 
-  const consumer = kafka.consumer({ groupId });
+  const consumer = kafka.consumer({
+    groupId,
+    sessionTimeout: Number(process.env.KAFKA_SESSION_TIMEOUT_MS ?? 30_000),
+    heartbeatInterval: Number(process.env.KAFKA_HEARTBEAT_INTERVAL_MS ?? 3_000),
+    rebalanceTimeout: Number(process.env.KAFKA_REBALANCE_TIMEOUT_MS ?? 60_000),
+  });
 
-  await consumer.connect();
+  try {
+    await consumer.connect();
+  } catch (err) {
+    await consumer.disconnect().catch(() => undefined);
+    throw err;
+  }
 
   logger.info({ clientId, groupId }, "kafka consumer connected");
 
@@ -20,7 +30,7 @@ export async function createConsumer(
 export type KafkaEvent = {
     topic: string;
     key: string | null;
-    value: unknown;
+    value: string | null;
     partition: number;
     offset: string;
   };
@@ -28,7 +38,7 @@ export type KafkaEvent = {
 export async function runConsumer(
   consumer: Consumer,
   topics: string[],
-  handler: (payload: EachMessagePayload) => Promise<void>, //payload: KafkaEvent
+  handler: (event: KafkaEvent) => Promise<void>,
   options?: { fromBeginning?: boolean },
 ): Promise<void> {
   await consumer.subscribe({
@@ -50,7 +60,13 @@ export async function runConsumer(
         "Kafka messages received",
       );
 
-      await handler(payload);
+      await handler({
+        topic,
+        partition,
+        key: message.key?.toString() ?? null,
+        value: message.value?.toString() ?? null,
+        offset: message.offset,
+      });
 
       // await consumer.run({
       //   eachMessage: async ({ topic, partition, message }) => {

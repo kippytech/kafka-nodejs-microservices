@@ -1,22 +1,13 @@
-import { createProducer, publishJsonSafe, TOPICS } from "shared";
+import { createProducer, getPool, logger, runOutboxWorker, TOPICS } from "shared";
 
-let producer: Awaited<ReturnType<typeof createProducer>> | null = null;
-
-export async function initKafka() {
-  producer = await createProducer("media-service");
-}
-
-export async function publishAttachmentEvent(taskId: string, userId: string) {
-  await publishJsonSafe(
-    producer,
-    TOPICS.MEDIA_EVENTS,
-    {
-      eventType: "attachment.uploaded",
-      taskId,
-      userId,
-      message: "Attachment uploaded",
-      timestamp: new Date().toISOString(),
-    },
-    taskId,
-  );
+export async function initKafka(): Promise<() => Promise<void>> {
+  const pool = getPool("MEDIA_DATABASE_URL");
+  const producer = await createProducer("media-service-outbox");
+  const controller = new AbortController();
+  const worker = runOutboxWorker(pool, producer, TOPICS.MEDIA_EVENTS, { signal: controller.signal })
+    .catch((err) => {
+      logger.fatal({ err }, "Media outbox worker stopped unexpectedly");
+      process.kill(process.pid, "SIGTERM");
+    });
+  return async () => { controller.abort(); await worker; await producer.disconnect(); };
 }

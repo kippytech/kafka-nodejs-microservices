@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package taskaccess.v1;
+
+service TaskAccessService {
+  rpc CheckTaskAccess (CheckTaskAccessRequest) returns (CheckTaskAccessResponse);
+}
+
+message CheckTaskAccessRequest {
+  string task_id = 1;
+  string user_id = 2;
+  string role = 3;
+  string action = 4;
+}
+
+message CheckTaskAccessResponse {
+  bool exists = 1;
+  bool allowed = 2;
+}

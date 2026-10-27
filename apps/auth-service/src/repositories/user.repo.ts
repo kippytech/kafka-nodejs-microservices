@@ -2,7 +2,7 @@ import { getPool } from "shared";
 import { User, UserRole } from "../types/auth.types";
 
 export async function findByEmail(email: string): Promise<User | null> {
-  const result = await getPool().query<User>(
+  const result = await getPool("USER_DATABASE_URL").query<User>(
     `
         SELECT id, name, email, password_hash, role, created_at
         FROM users
@@ -16,7 +16,7 @@ export async function findByEmail(email: string): Promise<User | null> {
 }
 
 export async function findById(id: string): Promise<User | null> {
-  const result = await getPool().query<User>(
+  const result = await getPool("USER_DATABASE_URL").query<User>(
     `
         SELECT id, name, email, password_hash, role, created_at
         FROM users
@@ -35,7 +35,7 @@ export async function createUser(input: {
   passwordHash: string;
   role?: UserRole;
 }): Promise<User> {
-  const result = await getPool().query<User>(
+  const result = await getPool("USER_DATABASE_URL").query<User>(
     `
         INSERT INTO users (name, email, password_hash, role)
         VALUES ($1, $2, $3, $4)

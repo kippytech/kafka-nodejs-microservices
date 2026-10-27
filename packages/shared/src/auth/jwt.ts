@@ -12,7 +12,7 @@ function extractjwtSecret(): string {
 }
 
 export function signToken(payload: JwtPayload): string {
-  const expiresIn = process.env.JWT_EXPIRES_IN;
+  const expiresIn = process.env.JWT_EXPIRES_IN ?? "7d";
 
   return jwt.sign(payload, extractjwtSecret(), {
     expiresIn: expiresIn as jwt.SignOptions["expiresIn"],

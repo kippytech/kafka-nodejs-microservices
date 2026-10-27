@@ -8,6 +8,7 @@ export type Workflow = {
 };
 
 export type DomainEvent = {
+  eventId?: string;
   eventType?: string;
   taskId?: string;
   userId?: string;

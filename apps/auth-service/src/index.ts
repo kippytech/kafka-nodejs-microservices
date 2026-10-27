@@ -5,7 +5,13 @@ import {
   AppError,
   errorHandler,
   httpLogger,
+  closeHttpServer,
+  closePool,
+  listenHttp,
   logger,
+  registerShutdown,
+  getPool,
+  verifyDatabase,
   requireGatewaySecret,
   successResponse,
 } from "shared";
@@ -33,6 +39,16 @@ app.use((_req, _res, next) => {
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  logger.info(`Auth service is now running on port ${PORT}`);
-});
+async function start() {
+  try {
+    await verifyDatabase(getPool("USER_DATABASE_URL"), "auth-service");
+    const server = listenHttp(app, PORT, "auth-service");
+    registerShutdown("auth-service", [() => closeHttpServer(server), closePool]);
+  } catch (err) {
+    logger.fatal({ err }, "Auth service startup failed");
+    await closePool().catch((closeErr) => logger.error({ err: closeErr }, "Failed to close database pool during startup cleanup"));
+    process.exitCode = 1;
+  }
+}
+
+void start();

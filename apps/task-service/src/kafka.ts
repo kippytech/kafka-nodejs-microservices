@@ -1,22 +1,13 @@
-import { createProducer, publishJsonSafe, TOPICS } from "shared";
+import { createProducer, getPool, logger, runOutboxWorker, TOPICS } from "shared";
 
-let producer: Awaited<ReturnType<typeof createProducer>> | null = null;
-
-export async function initKafka() {
-  producer = await createProducer("task-service");
-}
-
-export async function publishTaskEvent(taskId: string, userId: string) {
-  await publishJsonSafe(
-    producer,
-    TOPICS.TASK_EVENTS,
-    {
-      eventType: "task.created",
-      taskId,
-      userId,
-      message: "Task created successfully",
-      timestamp: new Date().toISOString(),
-    },
-    taskId,
-  );
+export async function initKafka(): Promise<() => Promise<void>> {
+  const pool = getPool("TASK_DATABASE_URL");
+  const producer = await createProducer("task-service-outbox");
+  const controller = new AbortController();
+  const worker = runOutboxWorker(pool, producer, TOPICS.TASK_EVENTS, { signal: controller.signal })
+    .catch((err) => {
+      logger.fatal({ err }, "Task outbox worker stopped unexpectedly");
+      process.kill(process.pid, "SIGTERM");
+    });
+  return async () => { controller.abort(); await worker; await producer.disconnect(); };
 }

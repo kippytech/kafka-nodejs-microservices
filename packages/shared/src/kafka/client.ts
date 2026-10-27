@@ -1,5 +1,4 @@
 import { Kafka, logLevel, type KafkaConfig } from "kafkajs";
-import { boolean } from "zod";
 
 export function createKafkaClient(
   clientId: string,
@@ -14,13 +13,20 @@ export function createKafkaClient(
     throw new Error("KAFKA_BROKERS are empty");
   }
 
+  const defaultRetry = {
+    retries: Number(process.env.KAFKA_RETRY_ATTEMPTS ?? 8),
+    initialRetryTime: 300,
+    maxRetryTime: 10_000,
+  };
+
   return new Kafka({
     clientId,
     brokers,
     logLevel: logLevel.ERROR,
-    retry: {
-      retries: 8,
-    },
+    connectionTimeout: Number(process.env.KAFKA_CONNECTION_TIMEOUT_MS ?? 5_000),
+    requestTimeout: Number(process.env.KAFKA_REQUEST_TIMEOUT_MS ?? 30_000),
+    enforceRequestTimeout: true,
     ...config,
+    retry: { ...defaultRetry, ...config.retry },
   });
 }

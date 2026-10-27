@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import express from "express";
+import { ServerResponse, type IncomingMessage } from "node:http";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit, { MINUTE } from "express-rate-limit";
@@ -9,7 +10,12 @@ import {
   errorHandler,
   httpLogger,
   logger,
+  closeHttpServer,
+  listenHttp,
+  registerShutdown,
   successResponse,
+  CircuitBreaker,
+  type CircuitPermit,
 } from "shared";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { gatewayAuth } from "./middleware/gatewayAuth";
@@ -31,6 +37,7 @@ const WORKFLOW_SERVICE_URL =
   process.env.WORKFLOW_SERVICE_URL || "http://localhost:3004";
 
 const app = express();
+app.disable("x-powered-by");
 
 //secure default http headers
 app.use(helmet());
@@ -50,33 +57,69 @@ app.use("/health", (_req, res) => {
   successResponse(res, { service: "api-gateway" });
 });
 
-app.use(
-  "/auth",
-  gatewayAuth,
-  createProxyMiddleware({
-    target: AUTH_SERVICE_URL,
+function proxy(name: string, target: string, pathRewrite: (path: string) => string) {
+  const breaker = new CircuitBreaker({
+    name,
+    failureThreshold: Number(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD ?? 5),
+    openMs: Number(process.env.CIRCUIT_BREAKER_OPEN_MS ?? 10_000),
+    onStateChange: (previous, state) => (state === "open" ? logger.warn : logger.info)({ dependency: name, previous, state }, "Gateway circuit breaker state changed"),
+  });
+  const permits = new WeakMap<IncomingMessage, CircuitPermit>();
+  const proxyMiddleware = createProxyMiddleware({
+    target,
     changeOrigin: true,
-    pathRewrite: (path) => `/auth${path}`,
-  }),
-);
+    pathRewrite,
+    timeout: Number(process.env.HTTP_REQUEST_TIMEOUT_MS ?? 30_000),
+    proxyTimeout: Number(process.env.HTTP_PROXY_TIMEOUT_MS ?? 5_000),
+    on: {
+      proxyRes(proxyRes, req) {
+        const permit = permits.get(req);
+        if (!permit) return;
+        permits.delete(req);
+        if ((proxyRes.statusCode ?? 500) >= 500) permit.failure();
+        else permit.success();
+      },
+      error(err, req, res) {
+        logger.error({ err, target, path: req.url }, "Upstream service proxy failed");
+        const permit = permits.get(req);
+        if (permit) {
+          permits.delete(req);
+          permit.failure();
+        }
+        if (res instanceof ServerResponse && !res.headersSent) {
+          res.writeHead(502, { "content-type": "application/json" });
+          res.end(JSON.stringify({ message: "Upstream service unavailable" }));
+        } else if (res instanceof ServerResponse && !res.writableEnded) {
+          res.end();
+        }
+      },
+    },
+  });
 
-const taskProxy = createProxyMiddleware({
-  target: TASK_SERVICE_URL,
-  changeOrigin: true,
-  pathRewrite: (currentPath) => `/tasks${currentPath}`,
-});
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const permit = breaker.acquire();
+    if (!permit) {
+      const retryAfterMs = breaker.getRetryAfterMs();
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(retryAfterMs / 1_000))));
+      res.status(503).json({ message: "Upstream service temporarily unavailable" });
+      return;
+    }
+    permits.set(req, permit);
+    res.once("close", () => {
+      if (!res.writableEnded) {
+        permits.get(req)?.ignore();
+        permits.delete(req);
+      }
+    });
+    proxyMiddleware(req, res, next);
+  };
+}
 
-const mediaProxy = createProxyMiddleware({
-  target: MEDIA_SERVICE_URL,
-  changeOrigin: true,
-  pathRewrite: (path) => `/tasks${path}`,
-});
+app.use("/auth", gatewayAuth, proxy("auth-service", AUTH_SERVICE_URL, (path) => `/auth${path}`));
 
-const workflowProxy = createProxyMiddleware({
-  target: WORKFLOW_SERVICE_URL,
-  changeOrigin: true,
-  pathRewrite: (path) => `/tasks${path}`,
-});
+const taskProxy = proxy("task-service", TASK_SERVICE_URL, (path) => `/tasks${path}`);
+const mediaProxy = proxy("media-service", MEDIA_SERVICE_URL, (path) => `/tasks${path}`);
+const workflowProxy = proxy("workflow-service", WORKFLOW_SERVICE_URL, (path) => `/tasks${path}`);
 
 app.use("/tasks", gatewayAuth, (req, res, next) => {
   if (req.path.includes("/attachments")) {
@@ -90,39 +133,11 @@ app.use("/tasks", gatewayAuth, (req, res, next) => {
   return taskProxy(req, res, next);
 });
 
-// app.use(
-//   "/tasks/:taskId/attachments",
-//   gatewayAuth,
-//   createProxyMiddleware({
-//     target: MEDIA_SERVICE_URL,
-//     changeOrigin: true,
-//   }),
-// );
-
-// app.use(
-//   "/tasks/:taskId/workflows",
-//   gatewayAuth,
-//   createProxyMiddleware({
-//     target: WORKFLOW_SERVICE_URL,
-//     changeOrigin: true,
-//   }),
-// );
-
-// app.use(
-//   "/tasks",
-//   gatewayAuth,
-//   createProxyMiddleware({
-//     target: TASK_SERVICE_URL,
-//     changeOrigin: true,
-//   }),
-// );
-
 app.use((_req, _res, next) => {
   next(new AppError(404, "Route not found"));
 });
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  logger.info(`API gateway running on port ${PORT}`);
-});
+const server = listenHttp(app, PORT, "api-gateway");
+registerShutdown("api-gateway", [() => closeHttpServer(server)]);

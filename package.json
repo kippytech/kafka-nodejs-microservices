@@ -14,16 +14,25 @@
     "dev:media": "npm run dev -w media-service",
     "dev:workflow": "npm run dev -w workflow-service",
     "dev:gateway": "npm run dev -w api-gateway",
-    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:migrate": "node --import tsx scripts/db-migrate.ts",
+    "db:migrate:auth": "node --import tsx scripts/db-migrate.ts auth",
+    "db:migrate:task": "node --import tsx scripts/db-migrate.ts task",
+    "db:migrate:media": "node --import tsx scripts/db-migrate.ts media",
+    "db:migrate:workflow": "node --import tsx scripts/db-migrate.ts workflow",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "proto:generate": "grpc_tools_node_protoc --proto_path=proto --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=packages/shared/src/grpc/generated --ts_proto_opt=outputServices=grpc-js,esModuleInterop=true,useExactTypes=false task_access.proto",
     "kafka:up": "docker compose -f docker/docker-compose.yml up -d",
     "kafka:down": "docker compose -f docker/docker-compose.yml down",
     "kafka:logs": "docker compose -f docker/docker-compose.yml logs -f kafka"
   },
   "devDependencies": {
+    "grpc-tools": "^1.13.1",
+    "ts-proto": "^2.18.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.6",
     "dotenv": "^17.4.2"
   }
 }

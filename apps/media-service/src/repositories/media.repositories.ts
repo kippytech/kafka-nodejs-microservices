@@ -1,27 +1,13 @@
 import { getPool } from "shared";
 import { Attachment } from "../utils/types";
 
-export async function findTaskAccess(taskId: string): Promise<{
-  id: string;
-  created_by: string;
-} | null> {
-  const result = await getPool().query<{ id: string; created_by: string }>(
-    `
-    SELECT id, created_by FROM tasks WHERE id = $1
-    `,
-    [taskId],
-  );
-
-  return result.rows[0] ?? null;
-}
-
 export async function createAttachment(input: {
   taskId: string;
   imageUrl: string;
   publicId: string;
   uploadedBy: string;
 }): Promise<Attachment> {
-  const result = await getPool().query<Attachment>(
+  const result = await getPool("MEDIA_DATABASE_URL").query<Attachment>(
     `
      INSERT INTO attachments (task_id, image_url, public_id, uploaded_by)
      VALUES ($1, $2, $3, $4)
@@ -39,7 +25,7 @@ export async function createAttachmentWithEvent(input: {
   publicId: string;
   uploadedBy: string;
 }): Promise<Attachment> {
-  const pool = getPool();
+  const pool = getPool("MEDIA_DATABASE_URL");
   const client = await pool.connect();
 
   try {
@@ -60,13 +46,11 @@ export async function createAttachmentWithEvent(input: {
       `
         INSERT INTO outbox_events (
           event_type,
-          aggregate_type,
-          aggregate_id,
           payload
         )
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2)
       `,
-      ["ATTACHMENT_CREATED", "ATTACHMENT", attachment.id, JSON.stringify(attachment)],
+      ["attachment.uploaded", JSON.stringify({ ...attachment, eventType: "attachment.uploaded" })],
     );
 
     await client.query("COMMIT");
@@ -81,7 +65,7 @@ export async function createAttachmentWithEvent(input: {
 }
 
 export async function listByTaskId(taskId: string): Promise<Attachment[]> {
-  const result = await getPool().query<Attachment>(
+  const result = await getPool("MEDIA_DATABASE_URL").query<Attachment>(
     `
         SELECT id, task_id, image_url, public_id, uploaded_by, created_at
         FROM attachments

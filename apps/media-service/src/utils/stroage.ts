@@ -41,7 +41,7 @@ export async function uploadBuffer(
     }),
   );
 
-  const baseUrl = endpoint.endsWith("/") ? endpoint.slice(0, 1) : endpoint;
+  const baseUrl = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
 
   return {
     publicId: Key,
