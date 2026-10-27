@@ -62,14 +62,14 @@ sequenceDiagram
     participant Task as Task Service
     participant DB as Task Database
     User->>Gateway: GET /tasks/:id/attachments + bearer token
-    Gateway->>Gateway: strip client identity headers; add gateway credential
+    Gateway->>Gateway: strip client identity headers and add gateway credential
     Gateway->>Media: forward request
     Media->>Media: verify signed token and derive user identity
-    Media->>Task: HTTP access check (bounded retry + circuit breaker)
+    Media->>Task: HTTP access check - bounded retry and circuit breaker
     Task->>Task: verify gateway credential
-    Task->>DB: check task ownership/access
+    Task->>DB: check task ownership or access
     DB-->>Task: access decision
-    Task-->>Media: { exists, allowed }
+    Task-->>Media: exists and allowed
     Media-->>Gateway: attachment response
     Gateway-->>User: response
 ```
